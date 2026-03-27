@@ -98,14 +98,6 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
       <option value="4">だい4か</option>
     </select>
     <h1>にほんご かいわ</h1>
-    <select class="btn-voice" id="voiceSelect" onchange="saveVoice()">
-      <option value="nova">🔊 Nova</option>
-      <option value="shimmer">🔊 Shimmer</option>
-      <option value="alloy">🔊 Alloy</option>
-      <option value="echo">🔊 Echo</option>
-      <option value="onyx">🔊 Onyx</option>
-      <option value="fable">🔊 Fable</option>
-    </select>
   </div>
 </div>
 
@@ -171,7 +163,7 @@ body{font-family:'Hiragino Sans','Meiryo','Noto Sans JP',sans-serif;background:l
 const API_BASE = 'https://nihongo-kaiwa-api.kabuyt.workers.dev';
 
 // ===== State =====
-let ttsVoice = localStorage.getItem('tts_voice') || 'nova';
+const ttsVoice = 'nova';
 let currentLesson = 1;
 let conversationHistory = [];
 let isRecording = false;
@@ -299,7 +291,6 @@ const lessonPrompts = {
 
 // ===== Init =====
 function init() {
-  document.getElementById('voiceSelect').value = ttsVoice;
   initSpeechRecognition();
 }
 
@@ -386,55 +377,115 @@ function startBlink() {
 }
 
 // ===== Speech Recognition =====
+// Web Speech API (Chrome/Edge) or MediaRecorder + Whisper fallback (Safari/iOS)
+let useWhisperFallback = false;
+let mediaRecorder = null;
+let audioChunks = [];
+
 function initSpeechRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return;
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.lang = 'ja-JP';
+    recognition.interimResults = false;
+    recognition.continuous = false;
 
-  recognition = new SpeechRecognition();
-  recognition.lang = 'ja-JP';
-  recognition.interimResults = false;
-  recognition.continuous = false;
+    recognition.onresult = (e) => {
+      const text = e.results[0][0].transcript;
+      handleUserSpeech(text);
+    };
 
-  recognition.onresult = (e) => {
-    const text = e.results[0][0].transcript;
-    addBubble(text, 'user');
-    setFaceState('thinking');
-    setStatus('かんがえています...');
-    conversationHistory.push({ role: 'user', content: text });
-    callChatAPI();
-  };
+    recognition.onerror = (e) => {
+      console.error('Speech error:', e.error);
+      if (e.error === 'no-speech') {
+        setStatus('こえが きこえませんでした');
+      } else if (e.error === 'not-allowed') {
+        setStatus('マイクを ゆるしてください');
+      }
+      stopRecording();
+    };
 
-  recognition.onerror = (e) => {
-    console.error('Speech error:', e.error);
-    if (e.error === 'no-speech') {
-      setStatus('こえが きこえませんでした');
-    } else if (e.error === 'not-allowed') {
-      setStatus('マイクを ゆるしてください');
-    }
-    stopRecording();
-  };
-
-  recognition.onend = () => {
-    stopRecording();
-  };
+    recognition.onend = () => {
+      stopRecording();
+    };
+  } else {
+    // Safari/iOS fallback: use MediaRecorder + Whisper API
+    useWhisperFallback = true;
+  }
 }
 
-function toggleMic() {
-  if (!recognition) {
-    alert('このブラウザは おんせいにんしきに たいおうしていません');
+function handleUserSpeech(text) {
+  addBubble(text, 'user');
+  setFaceState('thinking');
+  setStatus('かんがえています...');
+  conversationHistory.push({ role: 'user', content: text });
+  callChatAPI();
+}
+
+async function toggleMic() {
+  if (isRecording) {
+    if (useWhisperFallback && mediaRecorder) {
+      mediaRecorder.stop();
+    } else if (recognition) {
+      recognition.stop();
+    }
     return;
   }
 
-  if (isRecording) {
-    recognition.stop();
-  } else {
-    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-    setFaceState('listening');
-    setStatus('きいています... 🎧');
-    isRecording = true;
-    document.getElementById('btnMic').classList.add('recording');
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  setFaceState('listening');
+  setStatus('きいています... 🎧');
+  isRecording = true;
+  document.getElementById('btnMic').classList.add('recording');
+
+  if (useWhisperFallback) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunks = [];
+      mediaRecorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4' });
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        stopRecording();
+        if (audioChunks.length === 0) return;
+        setFaceState('thinking');
+        setStatus('ききとっています...');
+        const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+        try {
+          const text = await whisperTranscribe(blob);
+          if (text) handleUserSpeech(text);
+          else { setStatus('こえが きこえませんでした'); setFaceState('idle'); }
+        } catch(err) {
+          console.error('Whisper error:', err);
+          setStatus('エラー: ' + err.message);
+          setFaceState('idle');
+        }
+      };
+      mediaRecorder.start();
+    } catch(err) {
+      console.error('Mic access error:', err);
+      setStatus('マイクを ゆるしてください');
+      stopRecording();
+    }
+  } else if (recognition) {
     recognition.start();
+  } else {
+    setStatus('このブラウザは おんせいにんしきに たいおうしていません');
+    stopRecording();
   }
+}
+
+async function whisperTranscribe(blob) {
+  const formData = new FormData();
+  const ext = blob.type.includes('webm') ? 'webm' : 'm4a';
+  formData.append('file', blob, `audio.${ext}`);
+  const res = await fetch(API_BASE + '/api/whisper', {
+    method: 'POST',
+    body: formData
+  });
+  if (!res.ok) throw new Error(`Whisper error: ${res.status}`);
+  const data = await res.json();
+  return data.text;
 }
 
 function stopRecording() {

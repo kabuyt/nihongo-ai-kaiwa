@@ -24,6 +24,8 @@ export default {
         return await handleChat(request, env);
       } else if (url.pathname === '/api/tts') {
         return await handleTTS(request, env);
+      } else if (url.pathname === '/api/whisper') {
+        return await handleWhisper(request, env);
       } else {
         return new Response('Not found', { status: 404, headers: CORS_HEADERS });
       }
@@ -115,5 +117,43 @@ async function handleTTS(request, env) {
       ...CORS_HEADERS,
       'Content-Type': 'audio/mpeg',
     },
+  });
+}
+
+async function handleWhisper(request, env) {
+  const formData = await request.formData();
+  const file = formData.get('file');
+
+  if (!file) {
+    return new Response(JSON.stringify({ error: 'file is required' }), {
+      status: 400,
+      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const whisperForm = new FormData();
+  whisperForm.append('file', file, file.name || 'audio.webm');
+  whisperForm.append('model', 'whisper-1');
+  whisperForm.append('language', 'ja');
+
+  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
+    },
+    body: whisperForm,
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    return new Response(JSON.stringify({ error: data.error?.message || 'Whisper error' }), {
+      status: res.status,
+      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+    });
+  }
+
+  return new Response(JSON.stringify(data), {
+    headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
   });
 }
