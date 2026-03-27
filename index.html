@@ -549,7 +549,9 @@ async function callChatAPI() {
     const reply = data.choices[0].message.content.trim();
     conversationHistory.push({ role: 'assistant', content: reply });
     addBubble(reply, 'ai');
-    await speakText(reply);
+    // Start TTS but don't await — let it play in background
+    // so the UI stays responsive for next input
+    speakText(reply);
   } catch(err) {
     console.error('Chat API error:', err);
     setStatus('エラー: ' + err.message);
@@ -609,12 +611,21 @@ async function speakText(text) {
     };
 
     ttsAudio.onerror = () => {
+      console.error('TTS audio error');
       setFaceState('idle');
-      setStatus('おんせいの さいせいに しっぱいしました');
+      setStatus('🎤 ボタンを おして はなしてください');
       currentAudio = null;
     };
 
-    await ttsAudio.play();
+    try {
+      await ttsAudio.play();
+    } catch(playErr) {
+      // iOS may block play() — silently fail, text is already shown
+      console.warn('Audio play blocked:', playErr.message);
+      setFaceState('idle');
+      setStatus('🎤 ボタンを おして はなしてください');
+      currentAudio = null;
+    }
   } catch(err) {
     console.error('TTS error:', err);
     setFaceState('idle');
