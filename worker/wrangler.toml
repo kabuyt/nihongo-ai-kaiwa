@@ -1,0 +1,10 @@
+name = "nihongo-kaiwa-api"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# USリージョンで実行（OpenAI地域制限回避）
+[placement]
+mode = "smart"
+
+# デプロイ後に以下を実行してAPIキーを設定:
+# wrangler secret put OPENAI_API_KEY
