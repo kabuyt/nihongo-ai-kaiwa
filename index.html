@@ -572,12 +572,19 @@ const SILENCE = 'data:audio/mp3;base64,//uQxAAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVV
 let ttsResolve = null;
 
 // Called from user gesture handlers to pre-activate audio
+// Play silence briefly then stop — do NOT loop, as looping audio
+// blocks microphone input on iOS
 function activateAudio() {
-  ttsAudio.src = SILENCE;
-  ttsAudio.loop = true;
+  ttsAudio.loop = false;
   ttsAudio.volume = 0.01;
+  ttsAudio.src = SILENCE;
   const p = ttsAudio.play();
-  if (p) p.catch(() => {});
+  if (p) p.then(() => {
+    // Silence is very short, it will end naturally
+    ttsAudio.volume = 1.0;
+  }).catch(() => {
+    ttsAudio.volume = 1.0;
+  });
 }
 
 async function speakText(text) {

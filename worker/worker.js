@@ -96,10 +96,10 @@ async function handleTTS(request, env) {
       'Authorization': `Bearer ${env.OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'tts-1-hd',
+      model: 'tts-1',
       input: `[ja] ${input}`,
       voice: voice || 'nova',
-      speed: 0.85,
+      speed: 0.9,
     }),
   });
 
